@@ -7,6 +7,9 @@
 #define SCREEN_W 80
 #define SCREEN_H 25
 
+#define CELL_LIVING '#'
+#define CELL_DEAD ' '
+
 void wrap_coordinates( int * x, int * y ) {
     int xx = *x;
     int yy = *y;
@@ -28,12 +31,20 @@ void wrap_coordinates( int * x, int * y ) {
     *y = yy;
 }
 
+void set_cell( int cell_type, int x, int y, char conmap[SCREEN_W][SCREEN_H]) {
+	int *px = &x;
+	int *py = &y;
+	wrap_coordinates(px, py);
+	
+	conmap[x][y] = cell_type;
+}
+
 int check_neighbour( int x, int y, char conmap[SCREEN_W][SCREEN_H]) {
 
     int *px = &x;
     int *py = &y;
-
     wrap_coordinates(px,py);
+
     if ( conmap[x][y] == '#' ) {
         return 1;
     }
@@ -43,8 +54,9 @@ int check_neighbour( int x, int y, char conmap[SCREEN_W][SCREEN_H]) {
 
 int count_neighbours( int sx, int sy, char conmap[SCREEN_W][SCREEN_H]) {
     int tally = 0;
-
+	
 	int x, y;
+
 	for( x = -1; x < 2; x++ ) {
 		for( y = -1; y < 2; y++ ) {
 			if( x == 0 && y == 0 ) {
@@ -57,19 +69,17 @@ int count_neighbours( int sx, int sy, char conmap[SCREEN_W][SCREEN_H]) {
     return tally;
 }
 
-
-int plot_glider( char conmap[SCREEN_W][SCREEN_H]) {
-    int x, y, i, j, running;
+void plot_glider( char conmap[SCREEN_W][SCREEN_H]) {
+    int x, y;
 
     x = rand() % SCREEN_W;
     y = rand() % SCREEN_H;
-
-    conmap[x][y]     = '#';
-    conmap[x+1][y+1] = '#';
-    conmap[x+1][y+2] = '#';
-    conmap[x][y+2]   = '#';
-    conmap[x-1][y+2] = '#';
-
+	
+	set_cell( CELL_LIVING, x,     y,     conmap );
+	set_cell( CELL_LIVING, x + 1, y + 1, conmap );
+	set_cell( CELL_LIVING, x + 1, y + 2, conmap );
+	set_cell( CELL_LIVING, x,     y + 2, conmap );
+	set_cell( CELL_LIVING, x - 1, y + 2, conmap );
 }
 
 void wipe_map(char conmap[SCREEN_W][SCREEN_H]) {
@@ -77,56 +87,48 @@ void wipe_map(char conmap[SCREEN_W][SCREEN_H]) {
 
     for(i = 0; i < SCREEN_W; i++ ) {
         for(j = 0; j < SCREEN_H; j++) {
-            conmap[i][j] = ' ';
+			set_cell( CELL_DEAD, i, j, conmap );
         }
     }
 }
 
-int main()
-{
-    srand(time(NULL));
-
-    initscr();  // Initialize Curses window
-    raw();      // Disable line buffering and control characters (CTRL+C / CTRL+Z)
-    noecho();   // Do not show characters typed by user into terminal
+int main( int argc, char *argv[] ) {
+    srand(time(NULL));		// Seed randomizer
+    initscr();  			// Initialize Curses window
+    raw();      			// Disable line buffering and control characters (CTRL+C / CTRL+Z)
+    noecho();   			// Do not show characters typed by user into terminal
     keypad(stdscr, TRUE);   // enable input from function keys and arrow keys
-    curs_set(FALSE);    // Turn off the blinking cursor
-
+    curs_set(FALSE);    	// Turn off the blinking cursor
+	halfdelay(1);			// Update at about 10 frames per second
 
     int run = 1;
-
     int countdown = 100;
+	int key_in = ERR;
 
     char cmap[SCREEN_W][SCREEN_H];  // Current map
-    char nmap[SCREEN_W][SCREEN_H];  // New map, contents overwrite current map every cycle.
-
-    // general purpose iterators.
-    int i, j;
-
     wipe_map(cmap);
+    
+	char nmap[SCREEN_W][SCREEN_H];  // New map, contents overwrite current map every cycle.
     wipe_map(nmap);
 
-    // add a glider
+    int i, j;
+
+    // Add a glider to start
     for(i = 0; i < 3; i++ ) {
         plot_glider(cmap);
     }
 
-    halfdelay(1);	// Update at 10 frames per second
-
-    int in = ERR;
-
 	/* Main loop */
     while(run) {
 
-        countdown--;
-
-        if(countdown <= 0) {
+		countdown--;
+        
+		if(countdown <= 0) {
             plot_glider(cmap);
             countdown = 100;
         }
 
         // Process cells
-
         int n_neighbours = 0;
         int c_glyph = 0;
 
@@ -165,7 +167,6 @@ int main()
         }
 
         // Copy contents of nmap to cmap
-
         for(i = 0; i < SCREEN_W; i++ ) {
             for(j = 0; j < SCREEN_H; j++ ) {
                 cmap[i][j] = nmap[i][j];
@@ -173,22 +174,18 @@ int main()
         }
         wipe_map(nmap);
 
-
-        // Draw map
+        // Curses drawing
 		clear();	// TODO: Seems to cause flickering in Windows 10 / PDCurses
         for(i = 0; i < SCREEN_W; i++) {
             for(j = 0; j < SCREEN_H; j++ ) {
                 mvaddch(j,i,cmap[i][j]);
-
             }
         }
 		refresh();
 
-        // Quit if input detected
-
-        in = getch();
-
-        if( in != ERR ) {
+        // Quit if any input detected
+        key_in = getch();
+        if( key_in != ERR ) {
             run = 0;
         }
     }
