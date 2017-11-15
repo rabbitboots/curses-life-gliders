@@ -5,9 +5,6 @@
 
 #include "curses.h"
 
-#define SCREEN_W 80
-#define SCREEN_H 25
-
 #define CELL_LIVING '#'
 #define CELL_DEAD ' '
 
@@ -25,7 +22,7 @@ typedef struct Field_t {
 #define FIELD_H_DEF 25
 
 int confirmDimensions( int w, int h ) {
-	return (w >= FIELD_W_MIN && h >= FIELD_H_MIN && w <= FIELD_W_MAX - 1 && h <= FIELD_H_MAX - 1);
+	return (w >= FIELD_W_MIN && h >= FIELD_H_MIN && w <= FIELD_W_MAX  && h <= FIELD_H_MAX );
 }
 
 void wrapCoordinates( int * x, int * y, int w, int h ) {
@@ -153,14 +150,6 @@ void fieldDraw( Field * f ) {
 }
 
 int main( int argc, char *argv[] ) {
-    srand(time(NULL));		// Seed randomizer
-    initscr();  			// Initialize Curses window
-    raw();      			// Disable line buffering and control characters (CTRL+C / CTRL+Z)
-    noecho();   			// Do not show characters typed by user into terminal
-    keypad(stdscr, TRUE);   // enable input from function keys and arrow keys
-    curs_set(FALSE);    	// Turn off the blinking cursor
-	halfdelay(1);			// Update at about 10 frames per second
-
     int run = 1;
 	int countdown_refresh = 100;
     int countdown = countdown_refresh;
@@ -176,8 +165,15 @@ int main( int argc, char *argv[] ) {
 	#define ARG_NOTHING 0
 	#define ARG_SET_WIDTH 1
 	#define ARG_SET_HEIGHT 2
+	#define ARG_SET_STARTING_GLIDERS 3
+	#define ARG_SET_GLIDER_SPAWN_INTERVAL 4
 
 	if( argc > 1 ) {
+		// Show help
+		if( argc == 2 && strncmp( argv[1], "--help", ARG_SPAN ) == 0 ) {
+			printf( "./life [-w (1-256)] [-h (1-256)] [-start-gliders (0-100)] [-spawn-rate (1-32767)]\n");
+			return 0;
+		}
 		for( arg_walk = 0; arg_walk < argc; arg_walk++ ) {
 			if( arg_action == ARG_NOTHING ) {
 				if( strncmp( argv[arg_walk], "-w", ARG_SPAN ) == 0 ) {
@@ -187,7 +183,16 @@ int main( int argc, char *argv[] ) {
 				if( strncmp( argv[arg_walk], "-h", ARG_SPAN ) == 0 ) {
 					arg_action = ARG_SET_HEIGHT;
 					continue;
+				}	
+				if( strncmp( argv[arg_walk], "-start-gliders", ARG_SPAN ) == 0 ) {
+					arg_action = ARG_SET_STARTING_GLIDERS;
+					continue;
 				}
+				if( strncmp( argv[arg_walk], "-spawn-rate", ARG_SPAN ) == 0 ) {
+					arg_action = ARG_SET_GLIDER_SPAWN_INTERVAL;
+					continue;
+				}
+
 			}
 			if( arg_action == ARG_SET_WIDTH ) {
 				width = atoi( argv[arg_walk] );
@@ -199,13 +204,54 @@ int main( int argc, char *argv[] ) {
 				arg_action = ARG_NOTHING;
 				continue;
 			}
+			if( arg_action == ARG_SET_STARTING_GLIDERS ) {
+				start_gliders = atoi( argv[arg_walk] );
+				arg_action = ARG_NOTHING;
+				continue;
+			}
+
+			if( arg_action == ARG_SET_GLIDER_SPAWN_INTERVAL ) {
+				countdown_refresh = atoi( argv[arg_walk] );
+				arg_action = ARG_NOTHING;
+				continue;
+			}
+
 		}
 	}
-	
+
+	// Verify that the user-supplied options make sense
+	int verify = 1;
+	// Width and Height
 	if( !confirmDimensions( width, height ) ) {
-		printf( "Error: Couldn't use dimensions: w %d, h %d\n", width, height );
+		printf( "Error: Couldn't use dimensions: w %d, h %d (accepted ranges: 1-256)\n", width, height );
+		verify = 0;
+	}
+	// Glider start # and spawn intevals
+	if( start_gliders < 0 || start_gliders > 100 ) {
+		printf( "Error: couldn't use starting gliders value: %d (accepted range: 0-100)\n", start_gliders );
+		verify = 0;
+	}
+	if( countdown_refresh < 1 || countdown_refresh > 32767 ) {
+		printf( "Error: couldn't use glider spawn interval: %d (accepted range: 1-32767\n", countdown_refresh );
+	}
+	else {
+		countdown = countdown_refresh;
 	}
 
+	if( verify == 0 ) {
+		return -1;
+	}
+
+	// Start Curses.
+	srand(time(NULL));		// Seed randomizer
+    initscr();  			// Initialize Curses window
+    raw();      			// Disable line buffering and control characters (CTRL+C / CTRL+Z)
+    noecho();   			// Do not show characters typed by user into terminal
+    keypad(stdscr, TRUE);   // enable input from function keys and arrow keys
+    curs_set(FALSE);    	// Turn off the blinking cursor
+	halfdelay(1);			// Update at about 10 frames per second
+
+	// Allocate fields (current map, new map)
 	Field * c_map = fieldInit( width, height );
 	if( !c_map ) {
 		printf( "malloc() failed on c_map.\n" );
@@ -238,8 +284,8 @@ int main( int argc, char *argv[] ) {
         int n_neighbours = 0;
         int c_glyph = 0;
 
-        for(i = 0; i < SCREEN_W; i++ ) {
-            for( j = 0; j < SCREEN_H; j++ ) {
+        for(i = 0; i < c_map->w; i++ ) {
+            for( j = 0; j < c_map->h; j++ ) {
                 n_neighbours = countNeighbours( i, j, c_map );
 				c_glyph = getCell( i, j, c_map );
 
