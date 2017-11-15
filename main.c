@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h>
 
 #include "curses.h"
 
@@ -10,49 +11,102 @@
 #define CELL_LIVING '#'
 #define CELL_DEAD ' '
 
-void wrap_coordinates( int * x, int * y ) {
+typedef struct Field_t {
+	int w;
+	int h;
+	int * data;
+} Field;
+
+#define FIELD_W_MIN 1
+#define FIELD_W_MAX 256
+#define FIELD_W_DEF 80
+#define FIELD_H_MIN 1
+#define FIELD_H_MAX 256
+#define FIELD_H_DEF 25
+
+int confirmDimensions( int w, int h ) {
+	return (w >= FIELD_W_MIN && h >= FIELD_H_MIN && w <= FIELD_W_MAX - 1 && h <= FIELD_H_MAX - 1);
+}
+
+void wrapCoordinates( int * x, int * y, int w, int h ) {
     int xx = *x;
     int yy = *y;
 
     if (xx < 0 ) {
-        xx = SCREEN_W - (abs(xx) % SCREEN_W);
+        xx = w - ( abs(xx) % w );
     }
-    if (xx >= SCREEN_W ) {
-        xx = xx % SCREEN_W;
+    if (xx >= w ) {
+        xx = xx % w;
     }
     if (yy < 0 ) {
-        yy = SCREEN_H - (abs(yy) % SCREEN_H);
+        yy = h - ( abs(yy) % h );
     }
-    if (yy >= SCREEN_H ) {
-        yy = yy % SCREEN_H;
+    if (yy >= h ) {
+        yy = yy % h;
     }
 
     *x = xx;
     *y = yy;
 }
 
-void set_cell( int cell_type, int x, int y, char conmap[SCREEN_W][SCREEN_H]) {
+void setCell( int cell_type, int x, int y, Field * f ) {
 	int *px = &x;
 	int *py = &y;
-	wrap_coordinates(px, py);
+	wrapCoordinates( px, py, f->w, f->h );
 	
-	conmap[x][y] = cell_type;
+	f->data[ x + y * f->w ] = cell_type;
 }
 
-int check_neighbour( int x, int y, char conmap[SCREEN_W][SCREEN_H]) {
-
+int getCell( int x, int y, Field * f ) {
     int *px = &x;
     int *py = &y;
-    wrap_coordinates(px,py);
+    wrapCoordinates( px, py, f->w, f->h );
 
-    if ( conmap[x][y] == '#' ) {
-        return 1;
-    }
-
-    return 0;
+	return f->data[ x + y * f->w ];
 }
 
-int count_neighbours( int sx, int sy, char conmap[SCREEN_W][SCREEN_H]) {
+void fieldWipe( Field * f ) {
+    int i, j;
+
+    for(i = 0; i < f->w; i++ ) {
+        for(j = 0; j < f->h; j++) {
+			setCell( CELL_DEAD, i, j, f );
+        }
+    }
+}
+
+Field * fieldInit( int w, int h ) {
+	// Fail upon invalid supplied dimensions
+	if( !confirmDimensions( w, h ) ) {
+		return NULL;
+	}
+
+	Field * f = malloc( sizeof(Field) );
+	if( !f ) {
+		return NULL;
+	}
+	
+	f->w = w;
+	f->h = h;
+
+	f->data = malloc( sizeof(int) * w * h );
+	if( !f->data ) {
+		return NULL;
+	}
+
+	fieldWipe( f );
+
+	return f;
+}
+
+void fieldTearDown( Field * f ) {
+	if( f ) {
+		free( f->data );
+		free( f );
+	}
+}
+
+int countNeighbours( int sx, int sy, Field * f ) {
     int tally = 0;
 	
 	int x, y;
@@ -62,34 +116,40 @@ int count_neighbours( int sx, int sy, char conmap[SCREEN_W][SCREEN_H]) {
 			if( x == 0 && y == 0 ) {
 				continue;
 			}
-			tally += check_neighbour( sx + x, sy + y, conmap );
+			if( getCell( sx + x, sy + y, f ) == '#' ) {
+				tally++;
+			}
 		}
 	}
 
     return tally;
 }
 
-void plot_glider( char conmap[SCREEN_W][SCREEN_H]) {
+void plotGlider( Field * f ) {
+	int breakpoint = 'y';
     int x, y;
 
-    x = rand() % SCREEN_W;
-    y = rand() % SCREEN_H;
+    x = rand() % f->w;
+    y = rand() % f->h;
 	
-	set_cell( CELL_LIVING, x,     y,     conmap );
-	set_cell( CELL_LIVING, x + 1, y + 1, conmap );
-	set_cell( CELL_LIVING, x + 1, y + 2, conmap );
-	set_cell( CELL_LIVING, x,     y + 2, conmap );
-	set_cell( CELL_LIVING, x - 1, y + 2, conmap );
+	setCell( CELL_LIVING, x,     y,     f );
+	setCell( CELL_LIVING, x + 1, y + 1, f );
+	setCell( CELL_LIVING, x + 1, y + 2, f );
+	setCell( CELL_LIVING, x,     y + 2, f );
+	setCell( CELL_LIVING, x - 1, y + 2, f );
 }
 
-void wipe_map(char conmap[SCREEN_W][SCREEN_H]) {
-    int i, j;
 
-    for(i = 0; i < SCREEN_W; i++ ) {
-        for(j = 0; j < SCREEN_H; j++) {
-			set_cell( CELL_DEAD, i, j, conmap );
+// Curses drawing
+void fieldDraw( Field * f ) {
+	int x, y;
+	clear();	// TODO: Seems to cause flickering in Windows 10 / PDCurses
+    for( x = 0; x < f->w; x++ ) {
+        for( y = 0; y < f->h; y++ ) {
+				mvaddch( y, x, getCell( x, y, f ) );
         }
     }
+	refresh();
 }
 
 int main( int argc, char *argv[] ) {
@@ -102,20 +162,66 @@ int main( int argc, char *argv[] ) {
 	halfdelay(1);			// Update at about 10 frames per second
 
     int run = 1;
-    int countdown = 100;
+	int countdown_refresh = 100;
+    int countdown = countdown_refresh;
+	int start_gliders = 3;
 	int key_in = ERR;
 
-    char cmap[SCREEN_W][SCREEN_H];  // Current map
-    wipe_map(cmap);
-    
-	char nmap[SCREEN_W][SCREEN_H];  // New map, contents overwrite current map every cycle.
-    wipe_map(nmap);
+	int width = FIELD_W_DEF;
+	int height = FIELD_H_DEF;
 
+	int arg_walk = 0;
+	int arg_action = 0;
+	#define ARG_SPAN 32
+	#define ARG_NOTHING 0
+	#define ARG_SET_WIDTH 1
+	#define ARG_SET_HEIGHT 2
+
+	if( argc > 1 ) {
+		for( arg_walk = 0; arg_walk < argc; arg_walk++ ) {
+			if( arg_action == ARG_NOTHING ) {
+				if( strncmp( argv[arg_walk], "-w", ARG_SPAN ) == 0 ) {
+					arg_action = ARG_SET_WIDTH;
+					continue;
+				}
+				if( strncmp( argv[arg_walk], "-h", ARG_SPAN ) == 0 ) {
+					arg_action = ARG_SET_HEIGHT;
+					continue;
+				}
+			}
+			if( arg_action == ARG_SET_WIDTH ) {
+				width = atoi( argv[arg_walk] );
+				arg_action = ARG_NOTHING;
+				continue;
+			}
+			if( arg_action == ARG_SET_HEIGHT ) {
+				height = atoi( argv[arg_walk] );
+				arg_action = ARG_NOTHING;
+				continue;
+			}
+		}
+	}
+	
+	if( !confirmDimensions( width, height ) ) {
+		printf( "Error: Couldn't use dimensions: w %d, h %d\n", width, height );
+	}
+
+	Field * c_map = fieldInit( width, height );
+	if( !c_map ) {
+		printf( "malloc() failed on c_map.\n" );
+		exit(1);
+	}
+	Field * n_map = fieldInit( width, height );
+	if( !n_map ) {
+		printf( "malloc() failed on n_map.\n" );
+		exit(1);
+	}
+	
     int i, j;
 
-    // Add a glider to start
-    for(i = 0; i < 3; i++ ) {
-        plot_glider(cmap);
+    // Add some gliders to start
+    for(i = 0; i < start_gliders; i++ ) {
+        plotGlider(c_map);
     }
 
 	/* Main loop */
@@ -124,8 +230,8 @@ int main( int argc, char *argv[] ) {
 		countdown--;
         
 		if(countdown <= 0) {
-            plot_glider(cmap);
-            countdown = 100;
+            plotGlider(c_map);
+            countdown = countdown_refresh;
         }
 
         // Process cells
@@ -134,54 +240,47 @@ int main( int argc, char *argv[] ) {
 
         for(i = 0; i < SCREEN_W; i++ ) {
             for( j = 0; j < SCREEN_H; j++ ) {
-                n_neighbours = count_neighbours(i,j,cmap);
-                c_glyph = cmap[i][j];
+                n_neighbours = countNeighbours( i, j, c_map );
+				c_glyph = getCell( i, j, c_map );
 
                 if( c_glyph == '#' ) {
                     // a) Living cells with fewer than two neighbours die
                     if( n_neighbours < 2 ) {
-                        nmap[i][j] = ' ';
+						setCell( CELL_DEAD, i, j, n_map );
                     }
 
                     // b) Living cells with 2 or 3 neighbours persist
                     else if( n_neighbours  >= 2 && n_neighbours <= 3 ) {
-                        nmap[i][j] = '#';
+						setCell( CELL_LIVING, i, j, n_map );
                     }
 
                     // c) Living cells with more than 3 neighbours die
                     else if( n_neighbours  > 3 ) {
-                        nmap[i][j] = ' ';
+						setCell( CELL_DEAD, i, j, n_map );
                     }
                 }
                 // d) Dead cells with 3 neighbours come to life
                 else if( c_glyph == ' ') {
                     if( n_neighbours == 3 ) {
-                        nmap[i][j] = '#';
+						setCell( CELL_LIVING, i, j, n_map );
                     }
                     // Otherwise, dead cells remain dead
                     else {
-                        nmap[i][j] = ' ';
+                        setCell( CELL_DEAD, i, j, n_map );
                     }
                 }
             }
         }
 
-        // Copy contents of nmap to cmap
-        for(i = 0; i < SCREEN_W; i++ ) {
-            for(j = 0; j < SCREEN_H; j++ ) {
-                cmap[i][j] = nmap[i][j];
+        // Copy contents of n_map to c_map
+        for(i = 0; i < c_map->w; i++ ) {
+            for(j = 0; j < c_map->h; j++ ) {
+				setCell( getCell( i, j, n_map ), i, j, c_map );
             }
         }
-        wipe_map(nmap);
+        fieldWipe( n_map );
 
-        // Curses drawing
-		clear();	// TODO: Seems to cause flickering in Windows 10 / PDCurses
-        for(i = 0; i < SCREEN_W; i++) {
-            for(j = 0; j < SCREEN_H; j++ ) {
-                mvaddch(j,i,cmap[i][j]);
-            }
-        }
-		refresh();
+		fieldDraw( c_map );
 
         // Quit if any input detected
         key_in = getch();
@@ -191,6 +290,10 @@ int main( int argc, char *argv[] ) {
     }
 
 	/* Shutdown */ 
+
+	fieldTearDown( c_map );
+	fieldTearDown( n_map );
+
     endwin();
     return 0;
 }
